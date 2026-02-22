@@ -27,3 +27,32 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, shipment });
 }
+export async function GET() {
+  const session = await getIronSession<SessionData>(await cookies() as any, sessionOptions);
+  const user = session.user;
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  // SHIPPER: only shipments they created
+  if (user.role === "SHIPPER") {
+    const shipments = await prisma.shipment.findMany({
+      where: { createdById: user.id },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ ok: true, shipments });
+  }
+
+  // ADMIN: all shipments
+  if (user.role === "ADMIN") {
+    const shipments = await prisma.shipment.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ ok: true, shipments });
+  }
+
+  // DRIVER: (optional for now) return forbidden until assignment is implemented
+  if (user.role === "DRIVER") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+}
