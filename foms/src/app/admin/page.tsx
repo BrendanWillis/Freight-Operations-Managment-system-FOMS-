@@ -19,6 +19,55 @@ function getStatusBadgeClass(status: string) {
   }
 }
 
+async function assignDriver(formData: FormData) {
+  "use server";
+
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  if (user.role !== "ADMIN") redirect("/");
+
+  const shipmentId = Number(formData.get("shipmentId"));
+  const driverId = String(formData.get("driverId") ?? "").trim();
+
+  if (!shipmentId || !driverId) {
+    redirect("/admin");
+  }
+
+  const shipment = await prisma.shipment.findUnique({
+    where: { id: shipmentId },
+  });
+
+  const driver = await prisma.user.findFirst({
+    where: {
+      id: driverId,
+      role: "DRIVER",
+    },
+  });
+
+  if (!shipment || !driver) {
+    redirect("/admin");
+  }
+
+  const nextStatus =
+    shipment.status === "Created" ? "Assigned" : shipment.status;
+
+  await prisma.shipment.update({
+    where: { id: shipmentId },
+    data: {
+      driverId,
+      status: nextStatus,
+      statusUpdates: {
+        create: {
+          status: nextStatus,
+          updatedById: user.id,
+        },
+      },
+    },
+  });
+
+  redirect("/admin");
+}
+
 async function updateAdminShipmentStatus(formData: FormData) {
   "use server";
 
@@ -35,6 +84,9 @@ async function updateAdminShipmentStatus(formData: FormData) {
 
   const shipment = await prisma.shipment.findUnique({
     where: { id: shipmentId },
+    include: {
+      deliveryConfirmation: true,
+    },
   });
 
   if (!shipment) {
@@ -43,7 +95,24 @@ async function updateAdminShipmentStatus(formData: FormData) {
 
   await prisma.shipment.update({
     where: { id: shipmentId },
-    data: { status },
+    data: {
+      status,
+      statusUpdates: {
+        create: {
+          status,
+          updatedById: user.id,
+        },
+      },
+      ...(status === "Delivered" && !shipment.deliveryConfirmation
+        ? {
+            deliveryConfirmation: {
+              create: {
+                note: "Marked delivered from admin dashboard",
+              },
+            },
+          }
+        : {}),
+    },
   });
 
   redirect("/admin");
@@ -84,16 +153,30 @@ export default async function AdminPage() {
 
   const shipments = await prisma.shipment.findMany({
     include: {
-      user: true,
+      shipper: true,
+      driver: true,
+      statusUpdates: {
+        orderBy: { createdAt: "asc" },
+      },
+      deliveryConfirmation: true,
     },
     orderBy: { createdAt: "desc" },
+  });
+
+  const drivers = await prisma.user.findMany({
+    where: { role: "DRIVER" },
+    orderBy: { email: "asc" },
   });
 
   const totalCount = shipments.length;
   const createdCount = shipments.filter((s) => s.status === "Created").length;
   const assignedCount = shipments.filter((s) => s.status === "Assigned").length;
-  const inTransitCount = shipments.filter((s) => s.status === "In Transit").length;
-  const deliveredCount = shipments.filter((s) => s.status === "Delivered").length;
+  const inTransitCount = shipments.filter(
+    (s) => s.status === "In Transit"
+  ).length;
+  const deliveredCount = shipments.filter(
+    (s) => s.status === "Delivered"
+  ).length;
 
   return (
     <>
@@ -168,7 +251,9 @@ export default async function AdminPage() {
             <div className="card h-100 border-success">
               <div className="card-body">
                 <div className="text-muted small">Delivered</div>
-                <div className="fs-4 fw-bold text-success">{deliveredCount}</div>
+                <div className="fs-4 fw-bold text-success">
+                  {deliveredCount}
+                </div>
               </div>
             </div>
           </div>
@@ -184,82 +269,142 @@ export default async function AdminPage() {
             {shipments.length === 0 ? (
               <p className="text-muted mt-3 mb-0">No shipments found.</p>
             ) : (
-              <div className="table-responsive mt-3">
-                <table className="table table-striped table-hover align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Reference</th>
-                      <th>Origin</th>
-                      <th>Destination</th>
-                      <th>Status</th>
-                      <th>Created By</th>
-                      <th>Created</th>
-                      <th style={{ minWidth: "200px" }}>Update Status</th>
-                      <th>Delete</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shipments.map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.id}</td>
-                        <td>{s.reference}</td>
-                        <td>{s.origin}</td>
-                        <td>{s.destination}</td>
-                        <td>
-                          <span className={`badge ${getStatusBadgeClass(s.status)}`}>
-                            {s.status}
+              <div className="mt-3">
+                {shipments.map((s) => (
+                  <div key={s.id} className="border rounded p-3 mb-3">
+                    <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                      <div>
+                        <div className="fw-semibold">
+                          #{s.id} - {s.reference}
+                        </div>
+                        <div className="text-muted small">
+                          {s.origin} → {s.destination}
+                        </div>
+                      </div>
+                      <div>
+                        <span className={`badge ${getStatusBadgeClass(s.status)}`}>
+                          {s.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="row g-2 small mb-3">
+                      <div className="col-12 col-md-3">
+                        <strong>Created By:</strong>{" "}
+                        {s.shipper?.email ?? "Unknown"}
+                      </div>
+                      <div className="col-12 col-md-3">
+                        <strong>Assigned Driver:</strong>{" "}
+                        {s.driver?.email ?? "Unassigned"}
+                      </div>
+                      <div className="col-12 col-md-3">
+                        <strong>Created:</strong>{" "}
+                        {new Date(s.createdAt).toLocaleString()}
+                      </div>
+                      <div className="col-12 col-md-3">
+                        {s.deliveryConfirmation ? (
+                          <span className="text-success">
+                            <strong>Delivery Confirmed:</strong>{" "}
+                            {new Date(
+                              s.deliveryConfirmation.confirmedAt
+                            ).toLocaleString()}
                           </span>
-                        </td>
-                        <td>{s.user?.email ?? "Unknown"}</td>
-                        <td>{new Date(s.createdAt).toLocaleString()}</td>
-                        <td>
-                          <form
-                            action={updateAdminShipmentStatus}
-                            className="d-flex flex-column flex-md-row gap-2"
+                        ) : (
+                          <span className="text-muted">
+                            No delivery confirmation yet
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="row g-2 mb-3">
+                      <div className="col-12 col-lg-5">
+                        <form
+                          action={assignDriver}
+                          className="d-flex flex-column flex-md-row gap-2"
+                        >
+                          <input type="hidden" name="shipmentId" value={s.id} />
+                          <select
+                            name="driverId"
+                            defaultValue={s.driverId ?? ""}
+                            className="form-select form-select-sm"
                           >
-                            <input type="hidden" name="shipmentId" value={s.id} />
-                            <select
-                              name="status"
-                              defaultValue={s.status}
-                              className="form-select form-select-sm"
-                              style={{ minWidth: "130px" }}
-                            >
-                              {STATUS_OPTIONS.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="submit"
-                              className="btn btn-sm btn-outline-primary"
-                            >
-                              Save
-                            </button>
-                          </form>
-                        </td>
-                        <td>
-                          <form action={deleteAdminShipment}>
-                            <input type="hidden" name="shipmentId" value={s.id} />
-                            <button
-                              type="submit"
-                              className="btn btn-sm btn-outline-danger"
-                            >
-                              Delete
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            <option value="">Select driver</option>
+                            {drivers.map((driver) => (
+                              <option key={driver.id} value={driver.id}>
+                                {driver.email}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="submit"
+                            className="btn btn-sm btn-outline-success"
+                          >
+                            Assign Driver
+                          </button>
+                        </form>
+                      </div>
+
+                      <div className="col-12 col-lg-4">
+                        <form
+                          action={updateAdminShipmentStatus}
+                          className="d-flex flex-column flex-md-row gap-2"
+                        >
+                          <input type="hidden" name="shipmentId" value={s.id} />
+                          <select
+                            name="status"
+                            defaultValue={s.status}
+                            className="form-select form-select-sm"
+                          >
+                            {STATUS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="submit"
+                            className="btn btn-sm btn-outline-primary"
+                          >
+                            Save Status
+                          </button>
+                        </form>
+                      </div>
+
+                      <div className="col-12 col-lg-3">
+                        <form action={deleteAdminShipment}>
+                          <input type="hidden" name="shipmentId" value={s.id} />
+                          <button
+                            type="submit"
+                            className="btn btn-sm btn-outline-danger w-100"
+                          >
+                            Delete Shipment
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+
+                    <div className="small">
+                      <strong>Status History</strong>
+                      {s.statusUpdates.length === 0 ? (
+                        <p className="text-muted mb-0 mt-1">
+                          No status updates recorded.
+                        </p>
+                      ) : (
+                        <ul className="mb-0 mt-1">
+                          {s.statusUpdates.map((update) => (
+                            <li key={update.id}>
+                              {update.status} -{" "}
+                              {new Date(update.createdAt).toLocaleString()}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            <div className="text-muted small mt-2">
-              Admin can oversee all shipments, update statuses, and remove records.
-            </div>
           </div>
         </div>
       </main>

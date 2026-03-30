@@ -39,7 +39,14 @@ async function createShipment(formData: FormData) {
       reference,
       origin,
       destination,
-      userId: user.id,
+      shipperId: user.id,
+      status: "Created",
+      statusUpdates: {
+        create: {
+          status: "Created",
+          updatedById: user.id,
+        },
+      },
     },
   });
 
@@ -63,7 +70,10 @@ async function updateShipmentStatus(formData: FormData) {
   const shipment = await prisma.shipment.findFirst({
     where: {
       id: shipmentId,
-      userId: user.id,
+      shipperId: user.id,
+    },
+    include: {
+      deliveryConfirmation: true,
     },
   });
 
@@ -73,7 +83,24 @@ async function updateShipmentStatus(formData: FormData) {
 
   await prisma.shipment.update({
     where: { id: shipmentId },
-    data: { status },
+    data: {
+      status,
+      statusUpdates: {
+        create: {
+          status,
+          updatedById: user.id,
+        },
+      },
+      ...(status === "Delivered" && !shipment.deliveryConfirmation
+        ? {
+            deliveryConfirmation: {
+              create: {
+                note: "Marked delivered from shipper dashboard",
+              },
+            },
+          }
+        : {}),
+    },
   });
 
   redirect("/shipper");
@@ -95,7 +122,7 @@ async function deleteShipment(formData: FormData) {
   const shipment = await prisma.shipment.findFirst({
     where: {
       id: shipmentId,
-      userId: user.id,
+      shipperId: user.id,
     },
   });
 
@@ -116,7 +143,14 @@ export default async function ShipperPage() {
   if (user.role !== "SHIPPER") redirect("/");
 
   const shipments = await prisma.shipment.findMany({
-    where: { userId: user.id },
+    where: { shipperId: user.id },
+    include: {
+      driver: true,
+      statusUpdates: {
+        orderBy: { createdAt: "asc" },
+      },
+      deliveryConfirmation: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -264,10 +298,6 @@ export default async function ShipperPage() {
                     </button>
                   </div>
                 </form>
-
-                <div className="text-muted small mt-3">
-                  This fulfills FR-002 (Shipment Creation and Management).
-                </div>
               </div>
             </div>
           </div>
@@ -285,94 +315,123 @@ export default async function ShipperPage() {
                 {shipments.length === 0 ? (
                   <p className="text-muted mt-3 mb-0">No shipments yet.</p>
                 ) : (
-                  <div className="table-responsive mt-3">
-                    <table className="table table-striped table-hover align-middle mb-0">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Reference</th>
-                          <th>Origin</th>
-                          <th>Destination</th>
-                          <th>Status</th>
-                          <th>Created</th>
-                          <th style={{ minWidth: "200px" }}>Update Status</th>
-                          <th>Delete</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {shipments.map((shipment) => (
-                          <tr key={shipment.id}>
-                            <td>{shipment.id}</td>
-                            <td>{shipment.reference}</td>
-                            <td>{shipment.origin}</td>
-                            <td>{shipment.destination}</td>
-                            <td>
-                              <span
-                                className={`badge ${getStatusBadgeClass(
-                                  shipment.status
-                                )}`}
-                              >
-                                {shipment.status}
+                  <div className="mt-3">
+                    {shipments.map((shipment) => (
+                      <div key={shipment.id} className="border rounded p-3 mb-3">
+                        <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                          <div>
+                            <div className="fw-semibold">
+                              #{shipment.id} - {shipment.reference}
+                            </div>
+                            <div className="text-muted small">
+                              {shipment.origin} → {shipment.destination}
+                            </div>
+                          </div>
+                          <div>
+                            <span
+                              className={`badge ${getStatusBadgeClass(
+                                shipment.status
+                              )}`}
+                            >
+                              {shipment.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="row g-2 small mb-3">
+                          <div className="col-12 col-md-4">
+                            <strong>Driver:</strong>{" "}
+                            {shipment.driver?.email ?? "Unassigned"}
+                          </div>
+                          <div className="col-12 col-md-4">
+                            <strong>Created:</strong>{" "}
+                            {new Date(shipment.createdAt).toLocaleString()}
+                          </div>
+                          <div className="col-12 col-md-4">
+                            {shipment.deliveryConfirmation ? (
+                              <span className="text-success">
+                                <strong>Delivery Confirmed:</strong>{" "}
+                                {new Date(
+                                  shipment.deliveryConfirmation.confirmedAt
+                                ).toLocaleString()}
                               </span>
-                            </td>
-                            <td>
-                              {new Date(shipment.createdAt).toLocaleString()}
-                            </td>
-                            <td>
-                              <form
-                                action={updateShipmentStatus}
-                                className="d-flex flex-column flex-md-row gap-2"
+                            ) : (
+                              <span className="text-muted">
+                                No delivery confirmation yet
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="row g-2 mb-3">
+                          <div className="col-12 col-md-8">
+                            <form
+                              action={updateShipmentStatus}
+                              className="d-flex flex-column flex-md-row gap-2"
+                            >
+                              <input
+                                type="hidden"
+                                name="shipmentId"
+                                value={shipment.id}
+                              />
+                              <select
+                                name="status"
+                                defaultValue={shipment.status}
+                                className="form-select form-select-sm"
                               >
-                                <input
-                                  type="hidden"
-                                  name="shipmentId"
-                                  value={shipment.id}
-                                />
-                                <select
-                                  name="status"
-                                  defaultValue={shipment.status}
-                                  className="form-select form-select-sm"
-                                  style={{ minWidth: "130px" }}
-                                >
-                                  {STATUS_OPTIONS.map((option) => (
-                                    <option key={option} value={option}>
-                                      {option}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button
-                                  type="submit"
-                                  className="btn btn-sm btn-outline-primary"
-                                >
-                                  Save
-                                </button>
-                              </form>
-                            </td>
-                            <td>
-                              <form action={deleteShipment}>
-                                <input
-                                  type="hidden"
-                                  name="shipmentId"
-                                  value={shipment.id}
-                                />
-                                <button
-                                  type="submit"
-                                  className="btn btn-sm btn-outline-danger"
-                                >
-                                  Delete
-                                </button>
-                              </form>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                                {STATUS_OPTIONS.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="submit"
+                                className="btn btn-sm btn-outline-primary"
+                              >
+                                Save Status
+                              </button>
+                            </form>
+                          </div>
+
+                          <div className="col-12 col-md-4">
+                            <form action={deleteShipment}>
+                              <input
+                                type="hidden"
+                                name="shipmentId"
+                                value={shipment.id}
+                              />
+                              <button
+                                type="submit"
+                                className="btn btn-sm btn-outline-danger w-100"
+                              >
+                                Delete Shipment
+                              </button>
+                            </form>
+                          </div>
+                        </div>
+
+                        <div className="small">
+                          <strong>Status History</strong>
+                          {shipment.statusUpdates.length === 0 ? (
+                            <p className="text-muted mb-0 mt-1">
+                              No status updates recorded.
+                            </p>
+                          ) : (
+                            <ul className="mb-0 mt-1">
+                              {shipment.statusUpdates.map((update) => (
+                                <li key={update.id}>
+                                  {update.status} -{" "}
+                                  {new Date(update.createdAt).toLocaleString()}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
-
-                <div className="text-muted small mt-2">
-                  Update or delete a shipment and save changes to persist them.
-                </div>
               </div>
             </div>
           </div>

@@ -2,8 +2,6 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "../lib/auth";
 import { prisma } from "../lib/db";
 
-const DRIVER_STATUS_OPTIONS = ["In Transit", "Delivered"];
-
 function getStatusBadgeClass(status: string) {
   switch (status) {
     case "Created":
@@ -29,16 +27,20 @@ async function updateDriverShipmentStatus(formData: FormData) {
   const shipmentId = Number(formData.get("shipmentId"));
   const status = String(formData.get("status") ?? "").trim();
 
-  if (!shipmentId || !DRIVER_STATUS_OPTIONS.includes(status)) {
+  if (!shipmentId || !["In Transit", "Delivered"].includes(status)) {
     redirect("/driver");
   }
 
   const shipment = await prisma.shipment.findFirst({
     where: {
       id: shipmentId,
+      driverId: user.id,
       status: {
         in: ["Assigned", "In Transit"],
       },
+    },
+    include: {
+      deliveryConfirmation: true,
     },
   });
 
@@ -48,7 +50,24 @@ async function updateDriverShipmentStatus(formData: FormData) {
 
   await prisma.shipment.update({
     where: { id: shipmentId },
-    data: { status },
+    data: {
+      status,
+      statusUpdates: {
+        create: {
+          status,
+          updatedById: user.id,
+        },
+      },
+      ...(status === "Delivered" && !shipment.deliveryConfirmation
+        ? {
+            deliveryConfirmation: {
+              create: {
+                note: "Delivered by assigned driver",
+              },
+            },
+          }
+        : {}),
+    },
   });
 
   redirect("/driver");
@@ -61,9 +80,17 @@ export default async function DriverPage() {
 
   const shipments = await prisma.shipment.findMany({
     where: {
+      driverId: user.id,
       status: {
         in: ["Assigned", "In Transit"],
       },
+    },
+    include: {
+      shipper: true,
+      statusUpdates: {
+        orderBy: { createdAt: "asc" },
+      },
+      deliveryConfirmation: true,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -136,79 +163,108 @@ export default async function DriverPage() {
         <div className="card">
           <div className="card-body">
             <div className="d-flex align-items-center justify-content-between">
-              <h2 className="h6 mb-0">Available Driver Shipments</h2>
+              <h2 className="h6 mb-0">My Assigned Shipments</h2>
               <span className="badge bg-secondary">{shipments.length} total</span>
             </div>
 
             {shipments.length === 0 ? (
               <p className="text-muted mt-3 mb-0">
-                No assigned or in-transit shipments right now.
+                No assigned shipments right now.
               </p>
             ) : (
-              <div className="table-responsive mt-3">
-                <table className="table table-striped table-hover align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Reference</th>
-                      <th>Origin</th>
-                      <th>Destination</th>
-                      <th>Status</th>
-                      <th>Created</th>
-                      <th style={{ minWidth: "200px" }}>Driver Update</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shipments.map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.id}</td>
-                        <td>{s.reference}</td>
-                        <td>{s.origin}</td>
-                        <td>{s.destination}</td>
-                        <td>
-                          <span className={`badge ${getStatusBadgeClass(s.status)}`}>
-                            {s.status}
+              <div className="mt-3">
+                {shipments.map((s) => (
+                  <div key={s.id} className="border rounded p-3 mb-3">
+                    <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                      <div>
+                        <div className="fw-semibold">
+                          #{s.id} - {s.reference}
+                        </div>
+                        <div className="text-muted small">
+                          {s.origin} → {s.destination}
+                        </div>
+                      </div>
+                      <div>
+                        <span className={`badge ${getStatusBadgeClass(s.status)}`}>
+                          {s.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="row g-2 small mb-3">
+                      <div className="col-12 col-md-4">
+                        <strong>Shipper:</strong>{" "}
+                        {s.shipper?.email ?? "Unknown"}
+                      </div>
+                      <div className="col-12 col-md-4">
+                        <strong>Created:</strong>{" "}
+                        {new Date(s.createdAt).toLocaleString()}
+                      </div>
+                      <div className="col-12 col-md-4">
+                        {s.deliveryConfirmation ? (
+                          <span className="text-success">
+                            <strong>Delivery Confirmed:</strong>{" "}
+                            {new Date(
+                              s.deliveryConfirmation.confirmedAt
+                            ).toLocaleString()}
                           </span>
-                        </td>
-                        <td>{new Date(s.createdAt).toLocaleString()}</td>
-                        <td>
-                          <form
-                            action={updateDriverShipmentStatus}
-                            className="d-flex flex-column flex-md-row gap-2"
+                        ) : (
+                          <span className="text-muted">
+                            No delivery confirmation yet
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      {s.status === "Assigned" ? (
+                        <form action={updateDriverShipmentStatus}>
+                          <input type="hidden" name="shipmentId" value={s.id} />
+                          <input type="hidden" name="status" value="In Transit" />
+                          <button
+                            type="submit"
+                            className="btn btn-sm btn-outline-primary"
                           >
-                            <input type="hidden" name="shipmentId" value={s.id} />
-                            <select
-                              name="status"
-                              defaultValue={
-                                s.status === "Assigned" ? "In Transit" : s.status
-                              }
-                              className="form-select form-select-sm"
-                              style={{ minWidth: "130px" }}
-                            >
-                              {DRIVER_STATUS_OPTIONS.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="submit"
-                              className="btn btn-sm btn-outline-primary"
-                            >
-                              Save
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            Start Transit
+                          </button>
+                        </form>
+                      ) : null}
+
+                      {s.status === "In Transit" ? (
+                        <form action={updateDriverShipmentStatus}>
+                          <input type="hidden" name="shipmentId" value={s.id} />
+                          <input type="hidden" name="status" value="Delivered" />
+                          <button
+                            type="submit"
+                            className="btn btn-sm btn-outline-success"
+                          >
+                            Mark Delivered
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+
+                    <div className="small">
+                      <strong>Status History</strong>
+                      {s.statusUpdates.length === 0 ? (
+                        <p className="text-muted mb-0 mt-1">
+                          No status updates recorded.
+                        </p>
+                      ) : (
+                        <ul className="mb-0 mt-1">
+                          {s.statusUpdates.map((update) => (
+                            <li key={update.id}>
+                              {update.status} -{" "}
+                              {new Date(update.createdAt).toLocaleString()}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            <div className="text-muted small mt-2">
-              Drivers can move shipments from Assigned to In Transit and then to Delivered.
-            </div>
           </div>
         </div>
       </main>
