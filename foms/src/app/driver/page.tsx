@@ -135,6 +135,9 @@ export default async function DriverPage() {
             <div className="text-muted small">
               Logged in as: {user.email} ({user.role})
             </div>
+            <div className="text-muted small">
+              Showing shipments assigned to you
+            </div>
           </div>
         </div>
 
@@ -199,13 +202,16 @@ export default async function DriverPage() {
                     </div>
 
                     <div className="row g-2 small mb-3">
-                      <div className="col-12 col-md-4">
-                        <strong>Shipper:</strong> {s.shipper?.email ?? "Unknown"}
+                      <div className="col-12 col-md-3">
+                        <strong>Assigned Driver:</strong> {user.email}
                       </div>
-                      <div className="col-12 col-md-4">
+                      <div className="col-12 col-md-3">
+                        <strong>Created By:</strong> {s.shipper?.email ?? "Unknown"}
+                      </div>
+                      <div className="col-12 col-md-3">
                         <strong>Created:</strong> {new Date(s.createdAt).toLocaleString()}
                       </div>
-                      <div className="col-12 col-md-4">
+                      <div className="col-12 col-md-3">
                         {s.deliveryConfirmation ? (
                           <span className="text-success">
                             <strong>Delivery Confirmed:</strong>{" "}

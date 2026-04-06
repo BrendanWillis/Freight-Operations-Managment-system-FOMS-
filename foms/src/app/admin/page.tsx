@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "../lib/auth";
 import { prisma } from "../lib/db";
 import AutoRefresh from "../components/AutoRefresh";
+import bcrypt from "bcryptjs";
 
 function getStatusBadgeClass(status: string) {
   switch (status) {
@@ -19,7 +20,6 @@ function getStatusBadgeClass(status: string) {
   }
 }
 
-// ✅ NEW: Create Driver
 async function createDriver(formData: FormData) {
   "use server";
 
@@ -33,10 +33,20 @@ async function createDriver(formData: FormData) {
     redirect("/admin");
   }
 
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    redirect("/admin");
+  }
+
+  const hashedPassword = await bcrypt.hash("password123", 10);
+
   await prisma.user.create({
     data: {
       email,
-      password: "password123", // simple default
+      password: hashedPassword,
       role: "DRIVER",
     },
   });
@@ -153,7 +163,6 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        {/* ✅ NEW: Create Driver UI */}
         <div className="card mb-4">
           <div className="card-body">
             <h2 className="h6 mb-3">Add New Driver</h2>
@@ -175,6 +184,9 @@ export default async function AdminPage() {
                 </button>
               </div>
             </form>
+            <div className="text-muted small mt-2">
+              New drivers are created with the default password: <strong>password123</strong>
+            </div>
           </div>
         </div>
 
