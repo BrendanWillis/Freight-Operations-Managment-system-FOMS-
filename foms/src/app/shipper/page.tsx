@@ -27,13 +27,20 @@ async function createShipment(formData: FormData) {
   if (!user) redirect("/login");
   if (user.role !== "SHIPPER") redirect("/");
 
-  const reference = String(formData.get("reference") ?? "").trim();
   const origin = String(formData.get("origin") ?? "").trim();
   const destination = String(formData.get("destination") ?? "").trim();
 
-  if (!reference || !origin || !destination) {
+  if (!origin || !destination) {
     redirect("/shipper");
   }
+
+  // ✅ NEW: Generate reference automatically
+  const lastShipment = await prisma.shipment.findFirst({
+    orderBy: { id: "desc" },
+  });
+
+  const nextId = (lastShipment?.id ?? 1000) + 1;
+  const reference = `FOMS-${nextId}`;
 
   await prisma.shipment.create({
     data: {
@@ -269,15 +276,7 @@ export default async function ShipperPage() {
                 <h2 className="h6">Create Shipment</h2>
 
                 <form action={createShipment} className="row g-3">
-                  <div className="col-12">
-                    <label className="form-label">Reference</label>
-                    <input
-                      name="reference"
-                      className="form-control"
-                      placeholder="REF-1001"
-                      required
-                    />
-                  </div>
+                  {/* ❌ Reference removed */}
 
                   <div className="col-12">
                     <label className="form-label">Origin</label>

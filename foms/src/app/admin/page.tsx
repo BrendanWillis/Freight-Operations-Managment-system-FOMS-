@@ -19,6 +19,31 @@ function getStatusBadgeClass(status: string) {
   }
 }
 
+// ✅ NEW: Create Driver
+async function createDriver(formData: FormData) {
+  "use server";
+
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  if (user.role !== "ADMIN") redirect("/");
+
+  const email = String(formData.get("email") ?? "").trim();
+
+  if (!email) {
+    redirect("/admin");
+  }
+
+  await prisma.user.create({
+    data: {
+      email,
+      password: "password123", // simple default
+      role: "DRIVER",
+    },
+  });
+
+  redirect("/admin");
+}
+
 async function assignDriver(formData: FormData) {
   "use server";
 
@@ -125,6 +150,31 @@ export default async function AdminPage() {
             <div className="text-muted small">
               Logged in as: {user.email} ({user.role})
             </div>
+          </div>
+        </div>
+
+        {/* ✅ NEW: Create Driver UI */}
+        <div className="card mb-4">
+          <div className="card-body">
+            <h2 className="h6 mb-3">Add New Driver</h2>
+            <form action={createDriver} className="row g-2 align-items-end">
+              <div className="col-12 col-md-6">
+                <label className="form-label small">Driver Email</label>
+                <input
+                  name="email"
+                  type="email"
+                  className="form-control form-control-sm"
+                  placeholder="driver@example.com"
+                  required
+                />
+              </div>
+
+              <div className="col-12 col-md-auto">
+                <button type="submit" className="btn btn-sm btn-success">
+                  Add Driver
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 
