@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "../lib/auth";
 import { prisma } from "../lib/db";
+import AutoRefresh from "../components/AutoRefresh";
 
 const STATUS_OPTIONS = ["Created", "Assigned", "In Transit", "Delivered"];
 
@@ -170,6 +171,8 @@ export default async function ShipperPage() {
 
   return (
     <>
+      <AutoRefresh intervalMs={5000} />
+
       <nav className="navbar navbar-expand-lg navbar-dark bg-dark">
         <div className="container">
           <a className="navbar-brand" href="/">
@@ -191,6 +194,10 @@ export default async function ShipperPage() {
       </nav>
 
       <main className="container py-4">
+        <div className="text-muted small mb-2">
+          Auto-refreshing every 5 seconds
+        </div>
+
         <div className="d-flex align-items-center justify-content-between mb-3">
           <div>
             <h1 className="h4 mb-1">Shipper Dashboard</h1>

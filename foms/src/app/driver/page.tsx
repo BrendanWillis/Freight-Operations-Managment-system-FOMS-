@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "../lib/auth";
 import { prisma } from "../lib/db";
+import AutoRefresh from "../components/AutoRefresh";
 
 function getStatusBadgeClass(status: string) {
   switch (status) {
@@ -101,6 +102,8 @@ export default async function DriverPage() {
 
   return (
     <>
+      <AutoRefresh intervalMs={5000} />
+
       <nav className="navbar navbar-expand-lg navbar-dark bg-dark">
         <div className="container">
           <a className="navbar-brand" href="/">
@@ -122,6 +125,10 @@ export default async function DriverPage() {
       </nav>
 
       <main className="container py-4">
+        <div className="text-muted small mb-2">
+          Auto-refreshing every 5 seconds
+        </div>
+
         <div className="d-flex align-items-center justify-content-between mb-3">
           <div>
             <h1 className="h4 mb-1">Driver Dashboard</h1>
@@ -193,20 +200,16 @@ export default async function DriverPage() {
 
                     <div className="row g-2 small mb-3">
                       <div className="col-12 col-md-4">
-                        <strong>Shipper:</strong>{" "}
-                        {s.shipper?.email ?? "Unknown"}
+                        <strong>Shipper:</strong> {s.shipper?.email ?? "Unknown"}
                       </div>
                       <div className="col-12 col-md-4">
-                        <strong>Created:</strong>{" "}
-                        {new Date(s.createdAt).toLocaleString()}
+                        <strong>Created:</strong> {new Date(s.createdAt).toLocaleString()}
                       </div>
                       <div className="col-12 col-md-4">
                         {s.deliveryConfirmation ? (
                           <span className="text-success">
                             <strong>Delivery Confirmed:</strong>{" "}
-                            {new Date(
-                              s.deliveryConfirmation.confirmedAt
-                            ).toLocaleString()}
+                            {new Date(s.deliveryConfirmation.confirmedAt).toLocaleString()}
                           </span>
                         ) : (
                           <span className="text-muted">
@@ -254,8 +257,7 @@ export default async function DriverPage() {
                         <ul className="mb-0 mt-1">
                           {s.statusUpdates.map((update) => (
                             <li key={update.id}>
-                              {update.status} -{" "}
-                              {new Date(update.createdAt).toLocaleString()}
+                              {update.status} - {new Date(update.createdAt).toLocaleString()}
                             </li>
                           ))}
                         </ul>
